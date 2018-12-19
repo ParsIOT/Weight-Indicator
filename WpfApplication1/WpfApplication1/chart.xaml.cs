@@ -5,41 +5,41 @@ using System.Windows;
 using System.Windows.Controls;
 using LiveCharts.Defaults;
 using LiveCharts.Wpf;
-using System.Timers;
 using LiveCharts;
-using System.Windows.Media.Imaging;
-using System.IO;
-using System.Windows.Media;
 using System.Threading;
+using System.Windows.Media;
+using System.Windows.Threading;
 
 namespace WpfApplication1
 {
-    /// <summary>
-    /// Interaction logic for MaterialCards.xaml
-    /// </summary>
-    public partial class chart : UserControl, INotifyPropertyChanged
+    public partial class chart : UserControl
     {
-        static Thread[] mythread = new Thread[5];
-        static Semaphore mutex = new Semaphore(1, 2);
+        private BackgroundWorker worker = null;
         public List<int> datas = new List<int>() { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
-        private double _lastLecture;
+        public List<SolidColorBrush> colors = new List<SolidColorBrush>() { Brushes.White, Brushes.CornflowerBlue};
+        private int cntr = 0;
+
         private Random rnd = new Random();
 
         public chart()
         {
             InitializeComponent();
+            DataContext = this;
             Console.ReadLine();
-
-
-
-            LastHourSeries = new SeriesCollection                                            //the data that is bined to xaml 
+            worker = new BackgroundWorker();
+            worker.WorkerSupportsCancellation = true;
+            worker.WorkerReportsProgress = true;
+            worker.DoWork += worker_DoWork;
+            worker.ProgressChanged += worker_ProgressChanged;
+            worker.RunWorkerCompleted += worker_RunWorkerCompleted;
+            LastHourSeries = new SeriesCollection                            
             {
                 new LineSeries
                 {
                     AreaLimit = -10,
                     Values = new ChartValues<ObservableValue>
                     {
-                        new ObservableValue(datas[0]),                      //its default values
+                        new ObservableValue(datas[0]),                      
                         new ObservableValue(datas[1]),
                         new ObservableValue(datas[2]),
                         new ObservableValue(datas[3]),
@@ -49,7 +49,7 @@ namespace WpfApplication1
                         new ObservableValue(datas[7]),
                         new ObservableValue(datas[8]),
                         new ObservableValue(datas[9]),
-                        new ObservableValue(datas[10]),                      //its default values
+                        new ObservableValue(datas[10]),                   
                         new ObservableValue(datas[11]),
                         new ObservableValue(datas[12]),
                         new ObservableValue(datas[13]),
@@ -62,116 +62,64 @@ namespace WpfApplication1
                     }
                 }
             };
-            DataContext = this;
-            mythread[0] = new Thread(producer);
-            mythread[0].Start();
-            mythread[1] = new Thread(consumer);
-            mythread[1].Start();
         }
 
-
-
-        void producer()
+        public int Data
         {
-            while (true)
-            {
-                mutex.WaitOne();
-                Data = rnd.Next(1, 13);
-                mutex.Release();
-                Thread.Sleep(500);
-            }
-            
-        }
-
-        void consumer()
-        {
-
-            while (true)
-            {
-                mutex.WaitOne();
-                LastHourSeries[0].Values.RemoveAt(0);               //we must also  have changes on our bined data(LastHourSeries)
-                LastHourSeries[0].Values.Add(new ObservableValue(Data));
-                mutex.Release();
-                Thread.Sleep(500);
-
-            }
-            
-            
-        }
-
-
-        public int Data                                     //the function to access datas list
-        {
-            get { return datas[19]; }                          //if you call Data() it will return last number
-            set                                               // if you set Data=value it will
-            {
-                datas.RemoveAt(0);                                  //will remove index 1
-                datas.Add(value);                                      //and append  the value to datas list
-                LastLecture = value;
-
-
-            }
-        }
-
-
-
-        private void BuildPngOnClick(object sender, RoutedEventArgs e)
-        {
-           
-            var viewbox = new Viewbox();
-            viewbox.Child = myChart1;
-            viewbox.Measure(myChart1.RenderSize);
-            viewbox.Arrange(new Rect(new Point(0, 0), myChart1.RenderSize));
-            myChart1.Update(true, true); //force chart redraw
-            viewbox.UpdateLayout();
-
-            SaveToPng(myChart1, "mychart.png");
-            //png file was created at the root directory.
-        }
-
-        private void SaveToPng(FrameworkElement visual, string fileName)
-        {
-            var encoder = new PngBitmapEncoder();
-            EncodeVisual(visual, fileName, encoder);
-        }
-
-        private static void EncodeVisual(FrameworkElement visual, string fileName, BitmapEncoder encoder)
-        {
-            var bitmap = new RenderTargetBitmap((int)visual.ActualWidth, (int)visual.ActualHeight, 96, 96, PixelFormats.Pbgra32);
-            bitmap.Render(visual);
-            var frame = BitmapFrame.Create(bitmap);
-            encoder.Frames.Add(frame);
-            using (var stream = File.Create(fileName)) encoder.Save(stream);
-        }
-    
-
-
-
-        public SeriesCollection LastHourSeries { get; set; }
-        public double LastLecture
-        {
-            get { return _lastLecture; }
+            get { return datas[19]; }
             set
             {
-                _lastLecture = value;
-                OnPropertyChanged("LastLecture");
+                datas.RemoveAt(0);
+                datas.Add(value);
+                LastHourSeries[0].Values.RemoveAt(0);
+                LastHourSeries[0].Values.Add(new ObservableValue(value));
             }
         }
 
+        public SeriesCollection LastHourSeries { get; set; }
 
-        public event PropertyChangedEventHandler PropertyChanged;
-
-        protected virtual void OnPropertyChanged(string propertyName = null)
+        private void ButtonBase_OnClick(object sender, RoutedEventArgs e)
         {
-            var handler = PropertyChanged;
-            if (handler != null) handler(this, new PropertyChangedEventArgs(propertyName));
+            worker.RunWorkerAsync(10000);
         }
 
-        private void UpdateOnclick(object sender, RoutedEventArgs e)
+        private void Cancell_OnClick(object sender, RoutedEventArgs e)
         {
-//            TimePowerChart.Update(true);
+            worker.CancelAsync();
         }
 
-        
+        void worker_DoWork(object sender, DoWorkEventArgs e)
+        {
+            int max = (int)e.Argument;
+            while(true)
+            {
+                if (worker.CancellationPending == true)
+                {
+                    e.Cancel = true;
+                    return;
+                }
+                int ProgressPercentage = rnd.Next(1, 10);
+                (sender as BackgroundWorker).ReportProgress(ProgressPercentage);
+                this.Dispatcher.BeginInvoke(DispatcherPriority.Normal,
+                    (ThreadStart)delegate()
+                    {
+                        weight.Text = Data.ToString();
+                    }
+                );
+                Thread.Sleep(1000);
+
+            }
+        }
+
+        void worker_ProgressChanged(object sender, ProgressChangedEventArgs e)
+        {
+            Data = e.ProgressPercentage;
+            Border1.Background = colors[cntr];
+            cntr++;
+            cntr = cntr % 2;
+        }
+
+        void worker_RunWorkerCompleted(object sender, RunWorkerCompletedEventArgs e) { }
+
     }
 }
